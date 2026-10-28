@@ -57,6 +57,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     private int monthOffset;
     private boolean advancedOpen;
     private int pendingRecordPrayer = -1;
+    private int pendingRecordDialog = -1;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView countdown;
@@ -163,7 +164,12 @@ public class MainActivity extends Activity implements SensorEventListener {
             final int idx = i;
             TextView t = ui.text(TAB_NAMES[i], 0, i == tab ? ui.btnText : ui.text, true, Gravity.CENTER);
             // Pastki menyu yozuvi: 18sp dan, masshtab bilan o'sadi, lekin sig'ishi uchun 24sp bilan cheklangan.
-            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, Math.min(24, Math.max(18, ui.sp(18))));
+            int size = (int) Math.min(24, Math.max(18, ui.sp(18)));
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+            t.setSingleLine(true);
+            t.setMaxLines(1);
+            // Uzun yozuv (masalan, "Sozlama") ikki qatorga tushmasin: sig'maguncha kichrayadi.
+            t.setAutoSizeTextTypeUniformWithConfiguration(12, size, 1, TypedValue.COMPLEX_UNIT_SP);
             t.setMinHeight(ui.dp(64));
             t.setGravity(Gravity.CENTER);
             t.setBackground(i == tab ? ui.rounded(ui.btnBg, 0, 0, 14) : null);
@@ -256,7 +262,14 @@ public class MainActivity extends Activity implements SensorEventListener {
             row.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             row.addView(ui.text(Calc.hhmm(t[i]), 36, past ? ui.sub : ui.text, true, Gravity.END));
             row.setContentDescription(Calc.name(i, now) + ", soat " + Calc.hhmm(t[i]) + (isCurrent ? ", hozirgi vaqt" : ""));
-            add(v, row, 8);
+            LinearLayout box = ui.vbox();
+            box.setPadding(ui.dp(16), ui.dp(10), ui.dp(16), ui.dp(12));
+            box.setBackground(row.getBackground());
+            row.setBackground(null);
+            row.setPadding(0, 0, 0, 0);
+            box.addView(row);
+            add(box, alertRow(i), 8);
+            add(v, box, 8);
         }
 
         add(v, ui.button("Vaqtlarni ovoz bilan o'qish", false, new View.OnClickListener() {
@@ -267,6 +280,45 @@ public class MainActivity extends Activity implements SensorEventListener {
         }), 14);
         tick();
         return scroll(v);
+    }
+
+    /** Vaqt ostidagi qator: qo'ng'iroqcha (ovozni yoqish/o'chirish) va ovoz tanlash tugmasi. */
+    private View alertRow(final int prayer) {
+        LinearLayout r = ui.hbox();
+        final boolean on = prefs.mode(prayer) != Prefs.MODE_OFF;
+        TextView bell = ui.text(on ? "\uD83D\uDD14" : "\uD83D\uDD15", 30, ui.text, false, Gravity.CENTER);
+        bell.setMinHeight(ui.dp(64));
+        bell.setBackground(on ? ui.rounded(ui.surface, ui.border, 2, 14) : ui.rounded(ui.surface, 0xFFC62828, 2, 14));
+        bell.setContentDescription(Calc.NAMES[prayer] + (on ? ": ovoz yoqilgan, o'chirish uchun bosing" : ": ovoz o'chiq, yoqish uchun bosing"));
+        bell.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                prefs.setMode(prayer, on ? Prefs.MODE_OFF : Prefs.MODE_SOUND);
+                Scheduler.schedule(MainActivity.this);
+                toast(Calc.NAMES[prayer] + (on ? ": ovoz o'chirildi" : ": ovoz yoqildi"));
+                render();
+            }
+        });
+        r.addView(bell, new LinearLayout.LayoutParams(ui.dp(76), ViewGroup.LayoutParams.WRAP_CONTENT));
+        String label;
+        int mode = prefs.mode(prayer);
+        if (mode == Prefs.MODE_OFF) label = "Ovozsiz";
+        else if (mode == Prefs.MODE_NOTIFY) label = "Faqat bildirishnoma";
+        else label = "\u266A " + prefs.soundName(prayer);
+        Button sound = ui.button(label, false, new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                pickSound(prayer);
+            }
+        });
+        sound.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.sp(19));
+        sound.setSingleLine(true);
+        sound.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        sound.setContentDescription(Calc.NAMES[prayer] + " uchun ovozni tanlash. Hozir: " + label);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        lp.leftMargin = ui.dp(8);
+        r.addView(sound, lp);
+        return r;
     }
 
     private void tick() {
@@ -749,13 +801,23 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     private void pickSound(final int prayer) {
         final int n = Prefs.RAW_SOUNDS.length;
-        String[] items = new String[n + 2];
-        for (int i = 0; i < n; i++) items[i] = Prefs.RAW_NAMES[i];
-        items[n] = "Telefon ovozlari (ohanglar)";
-        items[n + 1] = "Telefondagi fayl (masalan, azon mp3)";
-        choose("Ovozni tanlang", items, new Pick() {
+        String[] items = new String[n + 3];
+        items[0] = "O'z ovozim (yozib olish)";
+        for (int i = 0; i < n; i++) items[i + 1] = Prefs.RAW_NAMES[i];
+        items[n + 1] = "Telefon ovozlari (ohanglar)";
+        items[n + 2] = "Telefondagi fayl (azon, qo'shiq mp3)";
+        choose(Calc.NAMES[prayer] + " uchun ovoz", items, new Pick() {
             @Override
             public void picked(int i) {
+                if (prefs.mode(prayer) != Prefs.MODE_SOUND) {
+                    prefs.setMode(prayer, Prefs.MODE_SOUND);
+                    Scheduler.schedule(MainActivity.this);
+                }
+                if (i == 0) {
+                    recordDialog(prayer);
+                    return;
+                }
+                i--;
                 if (i < n) {
                     prefs.setSound(prayer, "raw:" + Prefs.RAW_SOUNDS[i], Prefs.RAW_NAMES[i]);
                     render();
@@ -773,6 +835,105 @@ public class MainActivity extends Activity implements SensorEventListener {
                 }
             }
         });
+    }
+
+    /** O'z ovozingizni yozib olish oynasi: yozilgan ovoz namoz vaqti kirganda chalinadi. */
+    private void recordDialog(final int prayer) {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingRecordDialog = prayer;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD);
+            return;
+        }
+        recorder.stop();
+        LinearLayout box = ui.vbox();
+        box.setBackgroundColor(ui.bg);
+        int pad = ui.dp(18);
+        box.setPadding(pad, pad, pad, pad);
+        box.addView(ui.text(Calc.NAMES[prayer] + " uchun o'z ovozingiz", 28, ui.text, true));
+        add(box, ui.text("\"Yozish\"ni bosing va ayting, masalan: \"" + Calc.NAMES[prayer]
+                + " namozi vaqti kirdi\". Keyin \"To'xtatish\"ni bosing.", 21, ui.sub, false), 8);
+        final TextView status = ui.text("", 24, ui.accentText, true, Gravity.CENTER);
+        add(box, status, 12);
+        final Button rec = ui.button("Yozish", true, null);
+        final Button listen = ui.button("Eshitib ko'rish", false, null);
+        final Button save = ui.button("Saqlash", true, null);
+        Button cancel = ui.button("Bekor qilish", false, null);
+        add(box, rec, 10);
+        add(box, listen, 10);
+        add(box, save, 10);
+        add(box, cancel, 10);
+        int theme = ui.dark ? android.R.style.Theme_DeviceDefault_Dialog_Alert : android.R.style.Theme_DeviceDefault_Light_Dialog_Alert;
+        ScrollView sv = new ScrollView(this);
+        sv.addView(box);
+        final AlertDialog d = new AlertDialog.Builder(this, theme).setView(sv).create();
+        final Runnable refresh = new Runnable() {
+            @Override
+            public void run() {
+                File f = Recorder.file(prefs, prayer);
+                boolean has = f != null && f.exists() && f.length() > 0;
+                if (recorder.isRecording()) {
+                    status.setText("Yozilmoqda... gapiring");
+                    status.setTextColor(0xFFC62828);
+                    rec.setText("To'xtatish");
+                } else {
+                    status.setText(has ? "Ovoz yozilgan" : "Hali yozilmagan");
+                    status.setTextColor(ui.accentText);
+                    rec.setText(has ? "Qaytadan yozish" : "Yozish");
+                }
+                listen.setEnabled(has && !recorder.isRecording());
+                listen.setAlpha(listen.isEnabled() ? 1f : 0.4f);
+                save.setEnabled(has && !recorder.isRecording());
+                save.setAlpha(save.isEnabled() ? 1f : 0.4f);
+            }
+        };
+        rec.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (recorder.isRecording()) {
+                    recorder.stop();
+                } else {
+                    AzanService.stop(MainActivity.this);
+                    if (!recorder.start(MainActivity.this, prayer)) toast("Yozib bo'lmadi");
+                }
+                refresh.run();
+            }
+        });
+        listen.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                startService(new Intent(MainActivity.this, AzanService.class)
+                        .putExtra(AzanService.EXTRA_PRAYER, prayer)
+                        .putExtra(AzanService.EXTRA_PREVIEW_SOUND, "rec:" + prayer));
+            }
+        });
+        save.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                prefs.setSound(prayer, "rec:" + prayer, "O'z ovozim");
+                prefs.setMode(prayer, Prefs.MODE_SOUND);
+                Scheduler.schedule(MainActivity.this);
+                d.dismiss();
+                toast("Saqlandi. " + Calc.NAMES[prayer] + " vaqtida shu ovoz chalinadi.");
+                render();
+            }
+        });
+        cancel.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                d.dismiss();
+            }
+        });
+        d.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
+            @Override
+            public void onDismiss(android.content.DialogInterface di) {
+                recorder.stop();
+            }
+        });
+        refresh.run();
+        d.show();
+        if (d.getWindow() != null) {
+            d.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private static final String[] ANNOUNCE_LABELS = {"O'chiq", "Ichki erkak ovozi", "O'zingiz yozgan ovoz"};
@@ -1104,7 +1265,11 @@ public class MainActivity extends Activity implements SensorEventListener {
         boolean ok = results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED;
         if (code == REQ_LOCATION && ok) detectLocation();
         else if (code == REQ_LOCATION) toast("Ruxsat berilmadi. Shaharni ro'yxatdan tanlang.");
-        else if (code == REQ_RECORD && ok && pendingRecordPrayer >= 0) toggleRecord(pendingRecordPrayer);
+        else if (code == REQ_RECORD && ok && pendingRecordDialog >= 0) {
+            int p = pendingRecordDialog;
+            pendingRecordDialog = -1;
+            recordDialog(p);
+        } else if (code == REQ_RECORD && ok && pendingRecordPrayer >= 0) toggleRecord(pendingRecordPrayer);
         else if (code == REQ_NOTIF && ok) toast("Rahmat! Azon yoqildi.");
     }
 

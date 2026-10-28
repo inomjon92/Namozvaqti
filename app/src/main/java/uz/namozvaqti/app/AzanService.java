@@ -85,11 +85,12 @@ public class AzanService extends Service {
         } else if (previewAnnounce) {
             queue.add(announcement(p, prayer, today));
         } else {
-            if (p.announce() != Prefs.ANNOUNCE_OFF) {
-                if (iftor) queue.add("raw:say_iftor");
-                queue.add(announcement(p, prayer, today));
-            }
-            queue.add(p.sound(prayer));
+            String main = p.sound(prayer);
+            boolean ownVoice = main.startsWith("rec:");
+            if (iftor) queue.add("raw:say_iftor");
+            // O'z ovozi tanlangan bo'lsa, e'lon takrorlanmaydi: yozuvning o'zi e'lon.
+            if (p.announce() != Prefs.ANNOUNCE_OFF && !ownVoice) queue.add(announcement(p, prayer, today));
+            queue.add(main);
         }
 
         currentPrayer = preview != null || previewAnnounce ? -1 : prayer;
@@ -186,6 +187,10 @@ public class AzanService extends Service {
                 AssetFileDescriptor afd = getResources().openRawResourceFd(id);
                 mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
                 afd.close();
+            } else if (src.startsWith("rec:")) {
+                File f = Recorder.file(null, Integer.parseInt(src.substring(4)));
+                if (f == null || !f.exists() || f.length() == 0) throw new IllegalArgumentException(src);
+                mp.setDataSource(f.getAbsolutePath());
             } else if (src.startsWith("file:")) {
                 mp.setDataSource(src.substring(5));
             } else if (src.startsWith("uri:")) {

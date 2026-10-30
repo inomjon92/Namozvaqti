@@ -14,6 +14,10 @@ public final class Calc {
     public static final double FAJR_ANGLE = 15.0, ISHA_ANGLE = 15.0;
 
     public static final String[] NAMES = {"Bomdod", "Quyosh", "Peshin", "Asr", "Shom", "Xufton"};
+    /** Ogohlantirishlar: 6 ta namoz vaqti + Ramazonda saharlik va iftor. */
+    public static final int SAHAR = 6, IFTOR = 7, ALERTS = 8;
+    /** Saharlik eslatmasi Bomdoddan necha daqiqa oldin. */
+    public static final int SAHAR_BEFORE = 30;
     public static final String[] MONTHS = {"yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul",
             "avgust", "sentabr", "oktabr", "noyabr", "dekabr"};
     public static final String[] WEEKDAYS = {"", "Yakshanba", "Dushanba", "Seshanba", "Chorshanba",
@@ -63,6 +67,26 @@ public final class Calc {
     public static String name(int prayer, Calendar day) {
         if (prayer == PrayTimes.DHUHR && isFriday(day)) return "Juma";
         return NAMES[prayer];
+    }
+
+    public static String alertName(int i) {
+        if (i == SAHAR) return "Saharlik";
+        if (i == IFTOR) return "Iftor";
+        return NAMES[i];
+    }
+
+    /** Ogohlantirish vaqti, kun boshidan daqiqalarda. */
+    public static int alertMinutes(int i, int[] t) {
+        if (i == SAHAR) return t[PrayTimes.FAJR] - SAHAR_BEFORE;
+        if (i == IFTOR) return t[PrayTimes.MAGHRIB];
+        return t[i];
+    }
+
+    public static String alertTitle(int i, Calendar day) {
+        if (i == SAHAR) return "Saharlik tugashiga " + SAHAR_BEFORE + " daqiqa qoldi";
+        if (i == IFTOR) return "Iftor vaqti bo'ldi";
+        if (i == PrayTimes.SUNRISE) return "Quyosh chiqdi";
+        return name(i, day) + " namozi vaqti kirdi";
     }
 
     public static String gregorian(Calendar c) {

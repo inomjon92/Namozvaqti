@@ -1,6 +1,6 @@
-"""Ilova uchun melodiyalar, ovozli e'lonlar va ikonkani yaratadi.
+"""Ilova uchun melodiyalar va ikonkani yaratadi.
 
-Ishlatish: python3 tools/gen_assets.py  (ffmpeg va espeak-ng kerak)
+Ishlatish: python3 tools/gen_assets.py  (ffmpeg va Pillow kerak)
 """
 import math, os, struct, subprocess, sys, tempfile, wave
 
@@ -67,30 +67,6 @@ def gen_melodies():
     write_ogg("melody_signal", melody(beep * 3, 0.25, decay=6.0, harmonics=(1.0, 0.3)))
 
 
-ANNOUNCE = {
-    "say_bomdod": "Bomdod namozi vaqti kirdi.",
-    "say_quyosh": "Quyosh chiqdi.",
-    "say_peshin": "Peshin namozi vaqti kirdi.",
-    "say_juma": "Juma namozi vaqti kirdi.",
-    "say_asr": "Asr namozi vaqti kirdi.",
-    "say_shom": "Shom namozi vaqti kirdi.",
-    "say_xufton": "Xufton namozi vaqti kirdi.",
-    "say_iftor": "Iftor vaqti bo'ldi.",
-    "say_saharlik": "Saharlik vaqti tugashiga o'ttiz daqiqa qoldi.",
-}
-
-
-def gen_announcements():
-    for name, text in ANNOUNCE.items():
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            path = tmp.name
-        subprocess.run(["espeak-ng", "-v", "uz+m3", "-s", "135", "-p", "38", "-a", "180", "-w", path, text], check=True)
-        out = os.path.join(RAW, name + ".ogg")
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-af", "apad=pad_dur=0.6",
-                        "-c:a", "libvorbis", "-q:a", "4", out], check=True)
-        os.remove(path)
-
-
 def gen_icon():
     from PIL import Image, ImageDraw
     sizes = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
@@ -116,6 +92,5 @@ def gen_icon():
 if __name__ == "__main__":
     os.makedirs(RAW, exist_ok=True)
     gen_melodies()
-    gen_announcements()
     gen_icon()
     print("tayyor")

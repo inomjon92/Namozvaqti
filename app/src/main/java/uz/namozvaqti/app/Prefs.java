@@ -7,13 +7,14 @@ import android.content.SharedPreferences;
 public final class Prefs {
 
     public static final int MODE_OFF = 0, MODE_NOTIFY = 1, MODE_SOUND = 2;
-    public static final int ANNOUNCE_OFF = 0, ANNOUNCE_BUILTIN = 1, ANNOUNCE_RECORDED = 2;
 
     /** Ilova ichidagi ovozlar: resurs nomi va ko'rinadigan nomi. */
     public static final String[] RAW_SOUNDS = {"melody_hijoz", "melody_bell", "melody_tong", "melody_signal"};
     public static final String[] RAW_NAMES = {"Hijoz ohangi", "Qo'ng'iroq", "Tong ohangi", "Qisqa signal"};
 
-    private static final int[] DEFAULT_MODES = {MODE_SOUND, MODE_NOTIFY, MODE_SOUND, MODE_SOUND, MODE_SOUND, MODE_SOUND};
+    /** Bomdod, Quyosh, Peshin, Asr, Shom, Xufton, Saharlik, Iftor. */
+    private static final int[] DEFAULT_MODES = {MODE_SOUND, MODE_NOTIFY, MODE_SOUND, MODE_SOUND, MODE_SOUND, MODE_SOUND,
+            MODE_SOUND, MODE_SOUND};
 
     private final SharedPreferences sp;
 
@@ -46,9 +47,6 @@ public final class Prefs {
         sp.edit().putString("sound" + prayer, sound).putString("soundName" + prayer, name).apply();
     }
 
-    public int announce() { return sp.getInt("announce", ANNOUNCE_BUILTIN); }
-    public void setAnnounce(int v) { sp.edit().putInt("announce", v).apply(); }
-
     /** Namozdan oldin eslatma, daqiqada (0 = o'chiq). */
     public int reminder() { return sp.getInt("reminder", 15); }
     public void setReminder(int v) { sp.edit().putInt("reminder", v).apply(); }
@@ -67,9 +65,4 @@ public final class Prefs {
     /** Ramazon boshlanishini rasmiy e'longa moslash: -1, 0, +1 kun. */
     public int ramadanShift() { return sp.getInt("ramadanShift", 0); }
     public void setRamadanShift(int v) { sp.edit().putInt("ramadanShift", Math.max(-1, Math.min(1, v))).apply(); }
-
-    public boolean saharOn() { return sp.getBoolean("saharOn", true); }
-    public void setSaharOn(boolean v) { sp.edit().putBoolean("saharOn", v).apply(); }
-    public boolean iftorOn() { return sp.getBoolean("iftorOn", true); }
-    public void setIftorOn(boolean v) { sp.edit().putBoolean("iftorOn", v).apply(); }
 }

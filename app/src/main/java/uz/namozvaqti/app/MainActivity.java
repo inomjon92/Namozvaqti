@@ -71,6 +71,9 @@ public class MainActivity extends Activity implements SensorEventListener {
     private float declination;
     private float smoothHeading = Float.NaN;
     private boolean wasAligned;
+    private boolean usingRotationVector;
+    private boolean needsCalibration;
+    private float[] gravity, geomagnetic;
 
     private final Runnable ticker = new Runnable() {
         @Override
@@ -231,6 +234,10 @@ public class MainActivity extends Activity implements SensorEventListener {
             LinearLayout rc = ui.card(ui.surface, ui.border, 2);
             rc.addView(ui.text("Ramazonning " + (rIdx + 1) + "-kuni", 24, ui.accentText, true));
             rc.addView(ui.text("Saharlik: " + Calc.hhmm(t[PrayTimes.FAJR]) + "   Iftor: " + Calc.hhmm(t[PrayTimes.MAGHRIB]), 26, ui.text, true));
+            add(rc, ui.text("Saharlik eslatmasi", 20, ui.sub, false), 8);
+            add(rc, alertRow(Calc.SAHAR), 4);
+            add(rc, ui.text("Iftor eslatmasi", 20, ui.sub, false), 8);
+            add(rc, alertRow(Calc.IFTOR), 4);
             add(v, rc, 12);
         }
 
@@ -289,13 +296,13 @@ public class MainActivity extends Activity implements SensorEventListener {
         TextView bell = ui.text(on ? "\uD83D\uDD14" : "\uD83D\uDD15", 30, ui.text, false, Gravity.CENTER);
         bell.setMinHeight(ui.dp(64));
         bell.setBackground(on ? ui.rounded(ui.surface, ui.border, 2, 14) : ui.rounded(ui.surface, 0xFFC62828, 2, 14));
-        bell.setContentDescription(Calc.NAMES[prayer] + (on ? ": ovoz yoqilgan, o'chirish uchun bosing" : ": ovoz o'chiq, yoqish uchun bosing"));
+        bell.setContentDescription(Calc.alertName(prayer) + (on ? ": ovoz yoqilgan, o'chirish uchun bosing" : ": ovoz o'chiq, yoqish uchun bosing"));
         bell.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 prefs.setMode(prayer, on ? Prefs.MODE_OFF : Prefs.MODE_SOUND);
                 Scheduler.schedule(MainActivity.this);
-                toast(Calc.NAMES[prayer] + (on ? ": ovoz o'chirildi" : ": ovoz yoqildi"));
+                toast(Calc.alertName(prayer) + (on ? ": ovoz o'chirildi" : ": ovoz yoqildi"));
                 render();
             }
         });
@@ -314,7 +321,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         sound.setTextSize(TypedValue.COMPLEX_UNIT_SP, ui.sp(19));
         sound.setSingleLine(true);
         sound.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        sound.setContentDescription(Calc.NAMES[prayer] + " uchun ovozni tanlash. Hozir: " + label);
+        sound.setContentDescription(Calc.alertName(prayer) + " uchun ovozni tanlash. Hozir: " + label);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         lp.leftMargin = ui.dp(8);
         r.addView(sound, lp);
@@ -469,22 +476,18 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
         add(v, status, 12);
 
-        add(v, toggleButton("Saharlik eslatmasi (" + Scheduler.SAHAR_BEFORE + " daqiqa oldin)", prefs.saharOn(), new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                prefs.setSaharOn(!prefs.saharOn());
-                Scheduler.schedule(MainActivity.this);
-                render();
-            }
-        }), 10);
-        add(v, toggleButton("Iftor eslatmasi", prefs.iftorOn(), new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                prefs.setIftorOn(!prefs.iftorOn());
-                Scheduler.schedule(MainActivity.this);
-                render();
-            }
-        }), 8);
+        add(v, heading("Eslatmalar"), 14);
+        add(v, ui.text("Namoz vaqtlari kabi: qo'ng'iroqcha bilan yoqing yoki o'chiring, ovozini tanlang.", 20, ui.sub, false), 4);
+        LinearLayout sc = ui.card(ui.surface, 0, 0);
+        sc.addView(ui.text("Saharlik", 26, ui.text, true));
+        sc.addView(ui.text("Og'iz yopishdan " + Calc.SAHAR_BEFORE + " daqiqa oldin", 20, ui.sub, false));
+        add(sc, alertRow(Calc.SAHAR), 8);
+        add(v, sc, 8);
+        LinearLayout ic = ui.card(ui.surface, 0, 0);
+        ic.addView(ui.text("Iftor", 26, ui.text, true));
+        ic.addView(ui.text("Og'iz ochish vaqtida (Shom)", 20, ui.sub, false));
+        add(ic, alertRow(Calc.IFTOR), 8);
+        add(v, ic, 8);
 
         LinearLayout duo = ui.card(ui.surface, 0, 0);
         duo.addView(ui.text("Saharlik duosi (niyat)", 22, ui.accentText, true));
@@ -568,16 +571,39 @@ public class MainActivity extends Activity implements SensorEventListener {
         add(v, ui.text("Kompas noto'g'ri ko'rsatsa, telefonni havoda 8 raqami shaklida bir necha marta aylantiring.", 20, ui.sub, false, Gravity.CENTER), 12);
         GeomagneticField g = new GeomagneticField((float) c.lat, (float) c.lng, 0, System.currentTimeMillis());
         declination = g.getDeclination();
-        if (sensors == null || sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) == null) {
-            compassText.setText("Telefoningizda kompas yo'q. Qibla shimoldan soat yo'nalishi bo'yicha " + Math.round(q) + "° da.");
+        if (!hasCompass()) {
+            compassText.setText("Telefoningizda kompas (magnit datchigi) yo'q. Qibla shimoldan soat yo'nalishi bo'yicha "
+                    + Math.round(q) + "° da.");
         }
         return scroll(v);
     }
 
+    private boolean hasCompass() {
+        return sensors != null && (sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) != null
+                || sensors.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD) != null);
+    }
+
+    /**
+     * Arzon telefonlarda giroskop bo'lmaydi va TYPE_ROTATION_VECTOR ishlamaydi,
+     * shuning uchun akselerometr + magnit datchigi ham ishlatiladi.
+     */
     private void startCompass() {
         if (sensors == null || compass == null) return;
-        Sensor s = sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
-        if (s != null) sensors.registerListener(this, s, SensorManager.SENSOR_DELAY_UI);
+        gravity = null;
+        geomagnetic = null;
+        Sensor rv = sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+        Sensor acc = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        Sensor mag = sensors.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        if (rv != null) {
+            usingRotationVector = true;
+            sensors.registerListener(this, rv, SensorManager.SENSOR_DELAY_UI);
+        } else if (acc != null && mag != null) {
+            usingRotationVector = false;
+            sensors.registerListener(this, acc, SensorManager.SENSOR_DELAY_UI);
+            sensors.registerListener(this, mag, SensorManager.SENSOR_DELAY_UI);
+        }
+        // Magnit datchigi aniqligini kuzatish (kalibrovka kerakmi).
+        if (rv != null && mag != null) sensors.registerListener(this, mag, SensorManager.SENSOR_DELAY_NORMAL);
     }
 
     private void stopCompass() {
@@ -587,29 +613,56 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     @Override
     public void onSensorChanged(SensorEvent e) {
-        if (compass == null) return;
+        if (compass == null || compassText == null) return;
+        int type = e.sensor.getType();
         float[] rot = new float[9];
+        if (type == Sensor.TYPE_ROTATION_VECTOR) {
+            SensorManager.getRotationMatrixFromVector(rot, e.values);
+        } else if (usingRotationVector) {
+            return; // Faqat aniqlik uchun ro'yxatdan o'tgan magnit datchigi.
+        } else {
+            if (type == Sensor.TYPE_ACCELEROMETER) gravity = lowPass(e.values, gravity);
+            else if (type == Sensor.TYPE_MAGNETIC_FIELD) geomagnetic = lowPass(e.values, geomagnetic);
+            if (gravity == null || geomagnetic == null) return;
+            if (!SensorManager.getRotationMatrix(rot, null, gravity, geomagnetic)) return;
+        }
+        // Telefon tik ushlansa (ekran yuzga qaragan), o'qlarni almashtiramiz.
         float[] o = new float[3];
-        SensorManager.getRotationMatrixFromVector(rot, e.values);
         SensorManager.getOrientation(rot, o);
-        float h = (float) ((Math.toDegrees(o[0]) + declination + 360) % 360);
+        if (Math.abs(Math.toDegrees(o[1])) > 50) {
+            float[] remapped = new float[9];
+            SensorManager.remapCoordinateSystem(rot, SensorManager.AXIS_X, SensorManager.AXIS_Z, remapped);
+            SensorManager.getOrientation(remapped, o);
+        }
+        float h = (float) ((Math.toDegrees(o[0]) + declination + 720) % 360);
         if (Float.isNaN(smoothHeading)) smoothHeading = h;
         float diff = ((h - smoothHeading + 540) % 360) - 180;
-        smoothHeading = (smoothHeading + diff * 0.15f + 360) % 360;
+        smoothHeading = (smoothHeading + diff * 0.2f + 360) % 360;
         compass.setHeading(smoothHeading);
         Cities.City c = prefs.city();
         float q = (float) PrayTimes.qiblaBearing(c.lat, c.lng);
         float off = ((q - smoothHeading + 540) % 360) - 180;
         boolean aligned = Math.abs(off) < 5;
         compass.setAligned(aligned);
-        if (aligned) compassText.setText("Qibla to'g'ri!");
-        else compassText.setText(off > 0 ? "O'ngga buriling" : "Chapga buriling");
+        if (needsCalibration) compassText.setText("Telefonni havoda 8 raqami shaklida aylantiring");
+        else if (aligned) compassText.setText("Qibla to'g'ri!");
+        else compassText.setText((off > 0 ? "O'ngga buriling: " : "Chapga buriling: ") + Math.round(Math.abs(off)) + "°");
         if (aligned && !wasAligned) vibrate(150);
         wasAligned = aligned;
     }
 
+    private static float[] lowPass(float[] in, float[] out) {
+        if (out == null) return in.clone();
+        for (int i = 0; i < in.length && i < out.length; i++) out[i] = out[i] + 0.25f * (in[i] - out[i]);
+        return out;
+    }
+
     @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        if (sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
+            needsCalibration = accuracy <= SensorManager.SENSOR_STATUS_ACCURACY_LOW;
+        }
+    }
 
     private void vibrate(long ms) {
         Vibrator vb = (Vibrator) getSystemService(VIBRATOR_SERVICE);
@@ -649,9 +702,8 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         add(v, heading("Namoz ovozlari"), 18);
         add(v, ui.text("Ovoz chalinayotganda telefonning ovoz tugmasini bossangiz, ovoz o'chadi.", 20, ui.sub, false), 4);
-        for (int i = 0; i < PrayTimes.COUNT; i++) prayerSoundCard(v, i);
+        for (int i = 0; i < Calc.ALERTS; i++) prayerSoundCard(v, i);
 
-        announceSection(v);
 
         add(v, heading("Oldindan eslatma"), 18);
         final int[] opts = {0, 5, 10, 15, 30};
@@ -755,12 +807,16 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     private void prayerSoundCard(LinearLayout v, final int prayer) {
         LinearLayout card = ui.card(ui.surface, 0, 0);
-        card.addView(ui.text(Calc.NAMES[prayer] + (prayer == PrayTimes.DHUHR ? " / Juma" : ""), 26, ui.text, true));
+        String title = Calc.alertName(prayer);
+        if (prayer == PrayTimes.DHUHR) title += " / Juma";
+        if (prayer == Calc.SAHAR) title += " (Ramazonda, Bomdoddan " + Calc.SAHAR_BEFORE + " daqiqa oldin)";
+        if (prayer == Calc.IFTOR) title += " (Ramazonda, Shom vaqtida)";
+        card.addView(ui.text(title, 26, ui.text, true));
         int mode = prefs.mode(prayer);
         add(card, ui.button("Holati: " + MODE_LABELS[mode], mode == Prefs.MODE_SOUND, new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                choose(Calc.NAMES[prayer] + " uchun", MODE_LABELS, new Pick() {
+                choose(Calc.alertName(prayer) + " uchun", MODE_LABELS, new Pick() {
                     @Override
                     public void picked(int i) {
                         prefs.setMode(prayer, i);
@@ -806,7 +862,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         for (int i = 0; i < n; i++) items[i + 1] = Prefs.RAW_NAMES[i];
         items[n + 1] = "Telefon ovozlari (ohanglar)";
         items[n + 2] = "Telefondagi fayl (azon, qo'shiq mp3)";
-        choose(Calc.NAMES[prayer] + " uchun ovoz", items, new Pick() {
+        choose(Calc.alertName(prayer) + " uchun ovoz", items, new Pick() {
             @Override
             public void picked(int i) {
                 if (prefs.mode(prayer) != Prefs.MODE_SOUND) {
@@ -849,8 +905,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         box.setBackgroundColor(ui.bg);
         int pad = ui.dp(18);
         box.setPadding(pad, pad, pad, pad);
-        box.addView(ui.text(Calc.NAMES[prayer] + " uchun o'z ovozingiz", 28, ui.text, true));
-        add(box, ui.text("\"Yozish\"ni bosing va ayting, masalan: \"" + Calc.NAMES[prayer]
+        box.addView(ui.text(Calc.alertName(prayer) + " uchun o'z ovozingiz", 28, ui.text, true));
+        add(box, ui.text("\"Yozish\"ni bosing va ayting, masalan: \"" + Calc.alertName(prayer)
                 + " namozi vaqti kirdi\". Keyin \"To'xtatish\"ni bosing.", 21, ui.sub, false), 8);
         final TextView status = ui.text("", 24, ui.accentText, true, Gravity.CENTER);
         add(box, status, 12);
@@ -913,7 +969,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                 prefs.setMode(prayer, Prefs.MODE_SOUND);
                 Scheduler.schedule(MainActivity.this);
                 d.dismiss();
-                toast("Saqlandi. " + Calc.NAMES[prayer] + " vaqtida shu ovoz chalinadi.");
+                toast("Saqlandi. " + Calc.alertName(prayer) + " vaqtida shu ovoz chalinadi.");
                 render();
             }
         });
@@ -933,64 +989,6 @@ public class MainActivity extends Activity implements SensorEventListener {
         d.show();
         if (d.getWindow() != null) {
             d.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        }
-    }
-
-    private static final String[] ANNOUNCE_LABELS = {"O'chiq", "Ichki erkak ovozi", "O'zingiz yozgan ovoz"};
-
-    private void announceSection(LinearLayout v) {
-        add(v, heading("Ovozli e'lon"), 18);
-        add(v, ui.text("Azondan oldin \"Peshin namozi vaqti kirdi\" deb aytadi.", 20, ui.sub, false), 4);
-        add(v, ui.button("E'lon: " + ANNOUNCE_LABELS[prefs.announce()], prefs.announce() != Prefs.ANNOUNCE_OFF, new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                choose("Ovozli e'lon", ANNOUNCE_LABELS, new Pick() {
-                    @Override
-                    public void picked(int i) {
-                        prefs.setAnnounce(i);
-                        render();
-                    }
-                });
-            }
-        }), 8);
-        if (prefs.announce() == Prefs.ANNOUNCE_BUILTIN) {
-            add(v, ui.button("E'lonni sinab eshitish", false, new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    startService(new Intent(MainActivity.this, AzanService.class)
-                            .putExtra(AzanService.EXTRA_PRAYER, PrayTimes.DHUHR)
-                            .putExtra(AzanService.EXTRA_PREVIEW_ANNOUNCE, true));
-                }
-            }), 8);
-        }
-        if (prefs.announce() != Prefs.ANNOUNCE_RECORDED) return;
-        add(v, ui.text("Har bir namoz uchun \"Yozish\"ni bosing, masalan \"Peshin namozi vaqti kirdi\" deb ayting va \"Tugatish\"ni bosing.", 20, ui.sub, false), 8);
-        for (int i = 0; i < PrayTimes.COUNT; i++) {
-            final int prayer = i;
-            File f = Recorder.file(prefs, prayer);
-            boolean has = f != null && f.exists() && f.length() > 0;
-            boolean recNow = recorder.isRecording() && recorder.recordingPrayer() == prayer;
-            LinearLayout card = ui.card(ui.surface, recNow ? 0xFFC62828 : 0, recNow ? 4 : 0);
-            card.addView(ui.text(Calc.NAMES[prayer] + (has ? " — yozilgan" : " — yozilmagan"), 24, ui.text, true));
-            LinearLayout row = ui.hbox();
-            row.addView(ui.button(recNow ? "Tugatish" : "Yozish", true, new View.OnClickListener() {
-                @Override
-                public void onClick(View view) {
-                    toggleRecord(prayer);
-                }
-            }), Ui.weight(1, ui.dp(3)));
-            if (has && !recNow) {
-                row.addView(ui.button("Eshitish", false, new View.OnClickListener() {
-                    @Override
-                    public void onClick(View view) {
-                        startService(new Intent(MainActivity.this, AzanService.class)
-                                .putExtra(AzanService.EXTRA_PRAYER, prayer)
-                                .putExtra(AzanService.EXTRA_PREVIEW_ANNOUNCE, true));
-                    }
-                }), Ui.weight(1, ui.dp(3)));
-            }
-            add(card, row, 8);
-            add(v, card, 8);
         }
     }
 
@@ -1277,7 +1275,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onActivityResult(int code, int result, Intent data) {
         super.onActivityResult(code, result, data);
         if (result != RESULT_OK || data == null) return;
-        if (code >= REQ_FILE && code < REQ_FILE + PrayTimes.COUNT) {
+        if (code >= REQ_FILE && code < REQ_FILE + Calc.ALERTS) {
             Uri uri = data.getData();
             if (uri == null) return;
             try {
@@ -1286,7 +1284,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             }
             prefs.setSound(code - REQ_FILE, "uri:" + uri, displayName(uri));
             render();
-        } else if (code >= REQ_RINGTONE && code < REQ_RINGTONE + PrayTimes.COUNT) {
+        } else if (code >= REQ_RINGTONE && code < REQ_RINGTONE + Calc.ALERTS) {
             Uri uri = data.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
             if (uri == null) return;
             String name = "Telefon ovozi";

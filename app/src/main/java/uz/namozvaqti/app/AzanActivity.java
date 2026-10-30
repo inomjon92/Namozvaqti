@@ -55,13 +55,12 @@ public class AzanActivity extends Activity {
         int pad = ui.dp(24);
         root.setPadding(pad, pad, pad, pad);
 
-        String name = prayer < 0 ? "Namoz" : Calc.name(prayer, today);
-        String sub = prayer == PrayTimes.SUNRISE ? "Quyosh chiqdi" : "namozi vaqti kirdi";
-        root.addView(ui.text(prayer == PrayTimes.SUNRISE ? "Quyosh" : name, 52, Color.WHITE, true, Gravity.CENTER));
-        root.addView(ui.text(sub, 30, Color.WHITE, false, Gravity.CENTER));
+        root.addView(ui.text(prayer < 0 ? "Namoz vaqtlari" : Calc.alertTitle(prayer, today), 44, Color.WHITE, true, Gravity.CENTER));
         if (prayer >= 0) {
             int[] t = Calc.times(this, today);
-            root.addView(ui.text(Calc.hhmm(t[prayer]), 80, Color.WHITE, true, Gravity.CENTER));
+            int m = prayer == Calc.SAHAR ? t[PrayTimes.FAJR] : prayer == Calc.IFTOR ? t[PrayTimes.MAGHRIB] : t[prayer];
+            if (prayer == Calc.SAHAR) root.addView(ui.text("Og'iz yopish:", 28, Color.WHITE, false, Gravity.CENTER));
+            root.addView(ui.text(Calc.hhmm(m), 80, Color.WHITE, true, Gravity.CENTER));
         }
 
         Button stop = new Button(this);

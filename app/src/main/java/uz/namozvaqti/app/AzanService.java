@@ -25,7 +25,7 @@ import java.util.Calendar;
 import java.util.List;
 
 /**
- * Azon/melodiyani chaladi. Avval ovozli e'lon ("Peshin namozi vaqti kirdi"), keyin tanlangan ovoz.
+ * Namoz yoki ro'za vaqtida tanlangan ovozni (azon, melodiya, o'z ovozi) chaladi.
  * Ovoz tugmasi (pasaytirish yoki oshirish) bosilsa, darhol to'xtaydi.
  */
 public class AzanService extends Service {
@@ -33,11 +33,8 @@ public class AzanService extends Service {
     public static final String ACTION_STOP = "uz.namozvaqti.app.STOP";
     public static final String ACTION_FINISHED = "uz.namozvaqti.app.FINISHED";
     public static final String EXTRA_PRAYER = "prayer";
-    public static final String EXTRA_IFTOR = "iftor";
-    /** Sozlamalardan sinab eshitish: faqat shu ovoz, e'lonsiz. */
+    /** Sozlamalardan sinab eshitish. */
     public static final String EXTRA_PREVIEW_SOUND = "previewSound";
-    /** Sozlamalardan e'lonni sinab eshitish. */
-    public static final String EXTRA_PREVIEW_ANNOUNCE = "previewAnnounce";
 
     private static final int NOTIF_ID = 7;
 
@@ -74,43 +71,17 @@ public class AzanService extends Service {
         releasePlayer();
         queue.clear();
         int prayer = intent.getIntExtra(EXTRA_PRAYER, PrayTimes.DHUHR);
-        boolean iftor = intent.getBooleanExtra(EXTRA_IFTOR, false);
         String preview = intent.getStringExtra(EXTRA_PREVIEW_SOUND);
-        boolean previewAnnounce = intent.getBooleanExtra(EXTRA_PREVIEW_ANNOUNCE, false);
         Prefs p = new Prefs(this);
-        Calendar today = Calc.now();
+        queue.add(preview != null ? preview : p.sound(prayer));
 
-        if (preview != null) {
-            queue.add(preview);
-        } else if (previewAnnounce) {
-            queue.add(announcement(p, prayer, today));
-        } else {
-            String main = p.sound(prayer);
-            boolean ownVoice = main.startsWith("rec:");
-            if (iftor) queue.add("raw:say_iftor");
-            // O'z ovozi tanlangan bo'lsa, e'lon takrorlanmaydi: yozuvning o'zi e'lon.
-            if (p.announce() != Prefs.ANNOUNCE_OFF && !ownVoice) queue.add(announcement(p, prayer, today));
-            queue.add(main);
-        }
-
-        currentPrayer = preview != null || previewAnnounce ? -1 : prayer;
-        startAsForeground(prayer, preview == null && !previewAnnounce);
+        currentPrayer = preview != null ? -1 : prayer;
+        startAsForeground(prayer, preview == null);
         running = true;
         acquireWakeLock();
         startVolumeWatch();
         playNext();
         return START_NOT_STICKY;
-    }
-
-    /** Ovozli e'lon manbasi: yozib olingan ovoz bo'lsa o'sha, aks holda ichki ovoz. */
-    static String announcement(Prefs p, int prayer, Calendar day) {
-        if (p.announce() == Prefs.ANNOUNCE_RECORDED) {
-            File f = Recorder.file(p, prayer);
-            if (f != null && f.exists() && f.length() > 0) return "file:" + f.getAbsolutePath();
-        }
-        String[] raw = {"say_bomdod", "say_quyosh", "say_peshin", "say_asr", "say_shom", "say_xufton"};
-        if (prayer == PrayTimes.DHUHR && Calc.isFriday(day)) return "raw:say_juma";
-        return "raw:" + raw[prayer];
     }
 
     private void startAsForeground(int prayer, boolean fullScreen) {
@@ -124,8 +95,7 @@ public class AzanService extends Service {
         String title;
         if (prayer < 0) title = "Namoz vaqtlari";
         else if (!fullScreen) title = "Sinab eshitish";
-        else if (prayer == PrayTimes.SUNRISE) title = "Quyosh chiqdi";
-        else title = Calc.name(prayer, Calc.now()) + " namozi vaqti kirdi";
+        else title = Calc.alertTitle(prayer, Calc.now());
         Notification.Builder b = Build.VERSION.SDK_INT >= 26
                 ? new Notification.Builder(this, Notifier.CH_AZAN)
                 : new Notification.Builder(this);
@@ -152,7 +122,7 @@ public class AzanService extends Service {
         while (!queue.isEmpty()) {
             String src = queue.remove(0);
             MediaPlayer mp = create(src);
-            if (mp == null && !src.startsWith("raw:say")) mp = create("raw:" + Prefs.RAW_SOUNDS[0]);
+            if (mp == null) mp = create("raw:" + Prefs.RAW_SOUNDS[0]);
             if (mp == null) continue;
             player = mp;
             mp.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
